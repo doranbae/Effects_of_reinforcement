@@ -1,0 +1,157 @@
+---
+title: "W207_Final_Project"
+output: pdf_document
+---
+
+
+```{r}
+chooseCRANmirror(ind = 57)
+rm(list=ls())
+
+#setup and load data; remove first row
+library(data.table)
+library(magrittr)
+library(stargazer)
+setwd("~/Documents/BERK/SEM3/241/Final Project/3_RealThing")
+d = data.table(read.csv("241_actual.csv"))
+
+#fix names and remove first row
+names(d)[1] = 'V1'
+names(d)[1:10] = sapply(d[1, .(V1, V2, V3, V4, V5, V6, V7, V8, V9, V10)], as.character)
+d = d[-1]
+
+#treat as attrition if no validation code(vc)
+d.attr = d[vc=='']
+d = d[vc!='']
+
+#create treat variable (1 = treat; 0 = control)
+d[,treat:=(as.numeric(c.bc==''))]
+#based on treat, create pre.conf variable
+d[,pre.conf:=(treat*as.numeric(t.bc)+(1-treat)*as.numeric(c.bc)-1)]
+
+#sanity check
+#makes sure everyone answered both questions; and answer them only once
+sum(d$q1=='')+sum(d$q2=='') #should be 0
+(sum(d$q1!='')+sum(d$q2!=''))/2 #should be 1046
+(sum(d$c.conf1=='')+sum(d$c.conf2==''))/2 #should be number treated = 525
+(sum(d$tp.conf=='')+sum(d$tn.conf==''))/2 #should be number control = 521
+
+#convert variables into numeric
+d[,q1:=as.numeric(as.character(q1))]
+d[,q2:=as.numeric(as.character(q2))]
+d[,c.conf1:=as.numeric(as.character(c.conf1))]
+d[,c.conf2:=as.numeric(as.character(c.conf2))]
+d[,tp.conf:=as.numeric(as.character(tp.conf))]
+d[,tn.conf:=as.numeric(as.character(tn.conf))]
+d[,q1.time_2:=as.numeric(as.character(q1.time_2))]
+d[,q2.time_2:=as.numeric(as.character(q2.time_2))]
+d[,c.conf1.time_2:=as.numeric(as.character(c.conf1.time_2))]
+d[,c.conf2.time_2:=as.numeric(as.character(c.conf2.time_2))]
+d[,tp.conf.time_2:=as.numeric(as.character(tp.conf.time_2))]
+d[,tn.conf.time_2:=as.numeric(as.character(tn.conf.time_2))]
+
+#remove samples that answered questions too quickly (or have NA for timer)
+d = d[!is.na(d$q1.time_2)]
+d = d[!is.na(d$q2.time_2)]
+d = d[q1.time_2 > 3 & q2.time_2 > 3]
+
+install.packages("xlsx")
+library(xlsx)
+
+write.csv2(d,sep = "", "cleanse_data.csv")
+
+
+d7 = d[q1.time_2 <= 3 & q2.time_2 <= 3]
+d[, qrandomc := (as.numeric(as.character(qrandomc)))]
+d[, qrandomt := (as.numeric(as.character(qrandomt)))]
+d[, randompn := (as.numeric(as.character(randompn)))]
+#qrandomc: 1 = q1 first; 0 = q2 first
+#qrandomt: 1 = q1 first; 0 = q2 first
+#randompn: 1 = positive first; 0 = negative first
+
+#cq1: contol-q1-answer#1
+cq1 = d[treat==0,.(gender, age, edu, race, answer=q1, qtime=q1.time_2, ptreat=0, ntreat=0, first=qrandomc,
+           q1=1, pre.conf, conf=ifelse(qrandomc, c.conf1, c.conf2),  cftime=ifelse(qrandomc, c.conf1.time_2, c.conf2.time_2))]
+cq1[, crt:=(answer==1)]
+
+#cq2: control-q2-answer#3
+cq2 = d[treat==0,.(gender, age, edu, race, answer=q2, qtime=q2.time_2, ptreat=0, ntreat=0, first=(1-qrandomc),
+           q1=0, pre.conf, conf=ifelse((1-qrandomc), c.conf1, c.conf2),  cftime=ifelse((1-qrandomc), c.conf1.time_2, c.conf2.time_2))]
+cq2[, crt:=(answer==3)]
+
+#tq1a: treatment-q1-positiveFirst-answer#1
+tq1a = d[treat==1&qrandomt==1,.(gender, age, edu, race, answer=q1, qtime=q1.time_2, ptreat=randompn, ntreat=(1- randompn), first=1,q1=1, pre.conf, 
+                   conf=ifelse(randompn, tp.conf, tn.conf),  cftime=ifelse(randompn, tp.conf.time_2, tn.conf.time_2))]
+tq1a[, crt:=(answer==1)]
+
+#tq1b: treatment-q1-negativeFirst-answer#1
+tq1b = d[treat==1&qrandomt==0,.(gender, age, edu, race, answer=q1, qtime=q1.time_2, ptreat=(1-randompn), ntreat=randompn, first=0,q1=1, pre.conf, 
+                   conf=ifelse(randompn, tn.conf, tp.conf),  cftime=ifelse(randompn, tn.conf.time_2, tp.conf.time_2))]
+tq1b[, crt:=(answer==1)]
+
+#tq2a: treatment-q2-positiveFirst-answer#3
+tq2a = d[treat==1&qrandomt==0,.(gender, age, edu, race, answer=q2, qtime=q2.time_2, ptreat=randompn, ntreat=(1- randompn), first=1,q1=0, pre.conf, 
+                   conf=ifelse(randompn, tp.conf, tn.conf),  cftime=ifelse(randompn, tp.conf.time_2, tn.conf.time_2))]
+tq2a[, crt:=(answer==3)]
+
+#tq2b: treatment-q2-negativeFirst-answer#3
+tq2b = d[treat==1&qrandomt==1,.(gender, age, edu, race, answer=q2, qtime=q2.time_2, ptreat=(1-randompn), ntreat=randompn, first=0,q1=0, pre.conf, 
+                   conf=ifelse(randompn, tn.conf, tp.conf),  cftime=ifelse(randompn, tn.conf.time_2, tp.conf.time_2))]
+tq2b[, crt:=(answer==3)]
+
+#df contains basic info: gender, age, edu, race
+#q1 indicates whether the questions is q1
+#ptreat, ntreat indicates positive and negative reinforcement
+#first indicates whether the question is presented first
+#answer = selection for the question; qtime is time used
+#crt is whether the answer is correct
+#conf is confidence level selected for question; cftime is time used
+df=rbind(cq1, cq2, tq1a, tq1b, tq2b, tq2a)
+
+#check whether two questions are significantly different in confidence level (singals difficulty difference)
+summary(lm(conf~q1, df[ptreat==0&ntreat==0])) #control group
+summary(lm(conf~q1, df[ptreat!=0 | ntreat!=0])) #treatment group
+# there is no indication that these two questions were significantly different in both groups
+# how about for the entire population?
+summary(lm(conf~q1, data = df))
+# nope.
+
+#check whether order of the question and treatment matters
+summary(lm(conf~first, df))
+# this tests whether geting the first question matters in 
+# confidence level. Nope. 
+
+summary(lm(conf~first*ptreat, df))
+# this tests whether getting the first question matter 
+# for positive treatment group : NOPE
+
+summary(lm(conf~first*ntreat, df))
+# also no for the negative treatment group
+
+#ATE of positive reinforcement
+summary(lm(conf~ptreat, df[ntreat==0]))
+#ATE of negative reinforcement
+summary(lm(conf~ntreat, df[ptreat==0]))
+# looks like positive treatment has more effect on the confidence level.
+
+#combine both
+summary(lm(conf~ptreat+ntreat, df))
+
+#check whether pre-confidence level determines outcome
+summary(lm(conf~ptreat+ntreat+pre.conf, df))
+# Yes.
+
+#check whether getting the answer correct affects outcome
+summary(lm(conf~ptreat+ntreat+pre.conf+crt, df))
+#Yes.
+
+summary(lm(conf~ptreat+ntreat+pre.conf+crt+qtime, df))
+
+summary(lm(conf~ptreat+ntreat+pre.conf+crt+qtime+cftime, df))
+
+summary(lm(conf~pre.conf*(ptreat+ntreat), df))
+
+#big model that runs on covariates
+summary(lm(conf~ptreat+ntreat+pre.conf+crt+qtime+cftime+edu+race+gender, df))
+
+table(d$gender)
